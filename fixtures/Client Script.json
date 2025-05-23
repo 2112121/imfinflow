@@ -1,0 +1,58 @@
+[
+ {
+  "ID": "實際購買金額加總",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "\/\/ 先拿到你的真 fieldname：\r\n\/\/ 1) 子表的 Doctype 是 ReimbursementReceipt\r\n\/\/    子表里你那一列“實際購買金額”的 fieldname = 就是它自己名称\r\n\/\/ 2) 父表的 Doctype 是 ReimbursementRequest\r\n\/\/    父表里那个 Table 的 fieldname （收據與項目）也要完整一致\r\n\/\/ 3) 父表里“實際購買總金額”那个 fieldname 也要完整一致\r\n\r\n\/\/ 假设：\r\n\/\/ 子表實際購買金額 的 fieldname == '實際購買金額'\r\n\/\/ 父表那张表的 fieldname == '收據與項目'\r\n\/\/ 父表總額欄位 fieldname == '實際購買總金額'\r\n\r\nfrappe.ui.form.on('ReimbursementReceipt', {\r\n  \/\/ 监听子表行里「實際購買金額」改动\r\n  '實際購買金額': function(frm, cdt, cdn) {\r\n    _calc_actual(frm);\r\n  }\r\n});\r\n\r\nfrappe.ui.form.on('ReimbursementRequest', {\r\n  \/\/ 页面打开／刷新先跑一次\r\n  onload: function(frm) {\r\n    _calc_actual(frm);\r\n  },\r\n  \/\/ 增行、删行都跑一次\r\n  '收據與項目_add': function(frm, cdt, cdn) {\r\n    _calc_actual(frm);\r\n  },\r\n  '收據與項目_remove': function(frm, cdt, cdn) {\r\n    _calc_actual(frm);\r\n  }\r\n});\r\n\r\n\/\/ 核心加总逻辑\r\nfunction _calc_actual(frm) {\r\n  let total = 0;\r\n  \/\/ 直接用中文 fieldname 取数组\r\n  (frm.doc['收據與項目'] || []).forEach(row => {\r\n    \/\/ 取子表里的「實際購買金額」\r\n    total += row['實際購買金額'] || 0;\r\n  });\r\n  \/\/ 把结果设回父表的「實際購買總金額」\r\n  frm.set_value('實際購買總金額', total);\r\n}\r\n"
+ },
+ {
+  "ID": "預算轉撥監聽自動計算",
+  "文档类型": "BudgetTransfer",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "frappe.ui.form.on('BudgetTransfer', {\r\n  \/\/ 只在新纪录第一次打开时拉「前」余额并算「后」余额\r\n  onload(frm) {\r\n    if (frm.doc.__islocal) {\r\n      fetch_and_recalc(frm);\r\n    }\r\n  },\r\n\r\n  \/\/ 新纪录里改来源或目标都要再拉再算\r\n  來源預算(frm) {\r\n    if (frm.doc.__islocal) {\r\n      fetch_and_recalc(frm);\r\n    }\r\n  },\r\n  目標預算(frm) {\r\n    if (frm.doc.__islocal) {\r\n      fetch_and_recalc(frm);\r\n    }\r\n  },\r\n\r\n  \/\/ 新纪录里输入转拨额即时算「后」余额\r\n  轉撥預算(frm) {\r\n    if (frm.doc.__islocal) {\r\n      recalc(frm);\r\n    }\r\n  }\r\n\r\n  \/\/ **不再** 在 refresh() 里跑任何拉取或重算\r\n});\r\n\r\nfunction fetch_and_recalc(frm) {\r\n  \/\/ 先拉两个「前」余额\r\n  let p1 = Promise.resolve(), p2 = Promise.resolve();\r\n\r\n  if (frm.doc.來源預算) {\r\n    p1 = frappe.db\r\n      .get_value('BudgetAccount', frm.doc.來源預算, '可用餘額')\r\n      .then(r => frm.set_value('轉撥前來源可用餘額', r.message['可用餘額'] || 0));\r\n  }\r\n  if (frm.doc.目標預算) {\r\n    p2 = frappe.db\r\n      .get_value('BudgetAccount', frm.doc.目標預算, '可用餘額')\r\n      .then(r => frm.set_value('轉撥前目標可用餘額', r.message['可用餘額'] || 0));\r\n  }\r\n\r\n  \/\/ 全部拉完再算一次\r\n  Promise.all([p1, p2]).then(() => recalc(frm));\r\n}\r\n\r\nfunction recalc(frm) {\r\n  const amt      = frm.doc.轉撥預算 || 0;\r\n  const before_s = frm.doc.轉撥前來源可用餘額 || 0;\r\n  const before_t = frm.doc.轉撥前目標可用餘額 || 0;\r\n\r\n  frm.set_value('轉撥後來源可用餘額', before_s - amt);\r\n  frm.set_value('轉撥後目標可用餘額', before_t + amt);\r\n}\r\n"
+ },
+ {
+  "ID": "燈號提示",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "frappe.ui.form.on('ReimbursementRequest', { refresh(frm) { paint\\_indicator(frm); } }); function paint\\_indicator(frm) { const showStates = [ '待核銷管理員初審', '待部門主管審核', '待最高主管審核' ]; if (!showStates.includes(frm.doc.workflow\\_state)) { frm.dashboard.clear\\_headline(); return; } const bal = Number(frm.doc['可用餘額']) || 0; const spend = Number(frm.doc['總金額']) || 0; let color = 'green'; let msg = '餘額充足'; if (spend > bal) { color = 'red'; msg = '預算不足'; } else if (bal && spend \/ bal >= 0.6) { color = 'warning'; \/\/ “warning” maps to orange msg = `接近上限 ${Math.round(spend \/ bal \\* 100)}%`; } const remaining = frappe.format(bal - spend, { fieldtype: 'Currency' }); \/\/ one‐liner, using indicator-pill const pill = `` + `${msg}（剩餘 ${remaining}）` + ``; frm.dashboard.clear\\_headline(); frm.dashboard.set\\_headline(pill); } "
+ },
+ {
+  "ID": "購入後驗收階段時，自動按照明細替「收據與項目」子表新增行",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "frappe.ui.form.on('ReimbursementRequest', {\r\n    refresh(frm) {\r\n        if (frm.doc.workflow_state === '購入後驗收') {\r\n            sync_receipts(frm);\r\n        }\r\n    },\r\n    workflow_state(frm) {\r\n        if (frm.doc.workflow_state === '購入後驗收') {\r\n            sync_receipts(frm);\r\n        }\r\n    }\r\n});\r\n\r\nfunction sync_receipts(frm) {\r\n    const details = frm.doc.明細 || [];\r\n    const receipts = frm.doc.收據與項目 || [];\r\n\r\n    \/\/ 只在子表完全為空時自動填入\r\n    if (receipts.length === 0 && details.length) {\r\n        \/\/ 清空 (雖然已經是空的)\r\n        frm.clear_table('收據與項目');\r\n\r\n        \/\/ 逐行新增對應\r\n        details.forEach(item => {\r\n            let r = frm.add_child('收據與項目');\r\n            r.明細對照   = item.name;\r\n            r.明細品項名 = item.品項名;\r\n        });\r\n\r\n        frm.refresh_field('收據與項目');\r\n    }\r\n}\r\n"
+ },
+ {
+  "ID": "根據工作流鎖定欄位",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "frappe.ui.form.on('ReimbursementRequest', {\r\n    refresh(frm) {\r\n        const state = frm.doc.workflow_state || '';\r\n\r\n        \/\/ 狀態群組 1：申請日期、申請人、預算帳戶、明細\r\n        const ro1 = [\r\n          '待核銷管理員初審','待部門主管審核','待最高主管審核',\r\n          '可以購買','購入後驗收','不可以購買',\r\n          '待核銷管理員核對發票與實物','待財務核對紙本憑證與內容',\r\n          '待會計處理','購入後驗收補件','結案'\r\n        ].includes(state);\r\n\r\n        ['申請日期','申請人','預算帳戶','部門','明細'].forEach(field => {\r\n            frm.set_df_property(field, 'read_only', ro1);\r\n            frm.refresh_field(field);\r\n        });\r\n\r\n        \/\/ 狀態群組 2：購買日期、收據與項目\r\n        const ro2 = [\r\n          '待核銷管理員核對發票與實物',\r\n          '待財務核對紙本憑證與內容',\r\n          '待會計處理','結案'\r\n        ].includes(state);\r\n\r\n        ['購買日期','收據與項目'].forEach(field => {\r\n            frm.set_df_property(field, 'read_only', ro2);\r\n            frm.refresh_field(field);\r\n        });\r\n\r\n        \/\/ 狀態群組 3：會計憑證僅在「結案」時唯讀\r\n        const ro3 = (state === '結案');\r\n        frm.set_df_property('會計憑證', 'read_only', ro3);\r\n        frm.refresh_field('會計憑證');\r\n    },\r\n    workflow_state(frm) {\r\n        \/\/ workflow_state 若改變，也重新套用一次\r\n        frm.refresh();\r\n    }\r\n});\r\n"
+ },
+ {
+  "ID": "根據工作留顯示欄位",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "frappe.ui.form.on('ReimbursementRequest', {\r\n    refresh(frm) {\r\n        const state = frm.doc.workflow_state || '';\r\n\r\n        \/\/ 只有以下狀態才顯示「購買日期」與「收據與項目」\r\n        const showDetails = [\r\n            '購入後驗收',\r\n            '待核銷管理員核對發票與實物',\r\n            '待財務核對紙本憑證與內容',\r\n            '待會計處理',\r\n            '結案',\r\n            '購入後驗收補件'\r\n        ].includes(state);\r\n\r\n        frm.toggle_display('購買日期', showDetails);\r\n        frm.toggle_display('收據與項目', showDetails);\r\n        frm.toggle_display('實際購買總金額', showDetails);\r\n\r\n        \/\/ 只有以下狀態才顯示「會計憑證」\r\n        const showVoucher = ['待會計處理', '結案'].includes(state);\r\n        frm.toggle_display('會計憑證', showVoucher);\r\n    }\r\n});\r\n"
+ },
+ {
+  "ID": "核銷單總金額加總",
+  "文档类型": "ReimbursementRequest",
+  "应用于": "Form",
+  "模块（用于导出）": "imfinflow",
+  "已启用": 1,
+  "脚本": "\/\/ 針對父表：ReimbursementRequest\r\nfrappe.ui.form.on('ReimbursementRequest', {\r\n    \/\/ 存檔前保險再算一次\r\n    validate(frm) {\r\n        calc_total(frm);\r\n    },\r\n    \/\/ 子表「明細」增行時自動重算\r\n    明細_add(frm) {\r\n        calc_total(frm);\r\n    },\r\n    \/\/ 子表「明細」刪行時自動重算\r\n    明細_remove(frm) {\r\n        calc_total(frm);\r\n    }\r\n});\r\n\r\n\/\/ 針對子表：ReimbursementItem\r\nfrappe.ui.form.on('ReimbursementItem', {\r\n    \/\/ 只要「預估金額」被修改就重新計算\r\n    預估金額(frm, cdt, cdn) {\r\n        calc_total(frm);\r\n    }\r\n});\r\n\r\n\/\/ 共用函式：加總所有「預估金額」\r\nfunction calc_total(frm) {\r\n    let total = 0;\r\n    \/\/ frm.doc.明細 是你在 ReimbursementRequest DocType 裡那個子表欄位\r\n    (frm.doc.明細 || []).forEach(row => {\r\n        total += parseFloat(row.預估金額) || 0;\r\n    });\r\n    \/\/ 將結果寫回父表的「總金額」欄位\r\n    frm.set_value('總金額', total);\r\n}\r\n"
+ }
+]

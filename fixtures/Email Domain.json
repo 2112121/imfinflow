@@ -1,0 +1,17 @@
+[
+ {
+  "域名": "imcloud.co",
+  "接收服务器": "imap.secureserver.net",
+  "发件服务器": "smtpout.secureserver.net",
+  "使用IMAP": 1,
+  "使用SSL": 1,
+  "使用STARTTLS": 0,
+  "端口": "993",
+  "附件限制(MB)": 25,
+  "使用TLS": 0,
+  "use_ssl_for_outgoing": 1,
+  "smtp_port": "465",
+  "将邮件附加到已发送文件夹": 0,
+  "已发送文件夹名称": "Sent"
+ }
+]
